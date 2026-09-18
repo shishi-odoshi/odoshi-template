@@ -8,7 +8,9 @@
 # a heartbeat initializer for the jobs child, and rake chaos:* tasks that kill
 # children and assert the supervisor recovers them in under 10 seconds.
 
-gem "odoshi", "~> 0.3", require: false
+# The :supervisor group is what makes the slim boot possible — the supervisor
+# process activates only this group, never the app's gems (DESIGN §9).
+gem "odoshi", "~> 0.4", require: false, group: :supervisor
 # json 3.x breaks ActiveSupport::JSON.decode (2-arg JSON.parse) as of Rails
 # 8.1.3, which crash-loops Solid Queue's serialized columns. Remove this pin
 # once Rails supports json 3.
@@ -29,13 +31,21 @@ after_bundle do
                  env: { "ODOSHI_CHILD_ID" => "jobs" }
   RUBY
 
-  create_file "bin/supervise", <<~SH
-    #!/usr/bin/env bash
+  # A group-scoped binstub, NOT `bundle exec` (DESIGN §9): the supervisor must
+  # boot without activating the app's gems. `bundle exec` sets up every group
+  # in the lockfile — Rails included — which is the boot the supervisor exists
+  # to supervise. Bundler.setup(:supervisor) activates only the odoshi group.
+  create_file "bin/supervise", <<~RUBY
+    #!/usr/bin/env ruby
+    # frozen_string_literal: true
     # Run the app under the odoshi supervisor. Ctrl-C drains and stops.
-    set -euo pipefail
-    cd "$(dirname "$0")/.."
-    exec bundle exec odoshi run config/supervisor.rb
-  SH
+    Dir.chdir(File.expand_path("..", __dir__))
+    ENV["BUNDLE_GEMFILE"] ||= File.expand_path("Gemfile", Dir.pwd)
+    require "bundler"
+    Bundler.setup(:supervisor) # only the supervisor's gems — never the app's
+    ARGV.replace(["run", "config/supervisor.rb"]) if ARGV.empty?
+    load Gem.bin_path("odoshi", "odoshi")
+  RUBY
   chmod "bin/supervise", 0o755
 
   initializer "odoshi_heartbeat.rb", <<~RUBY

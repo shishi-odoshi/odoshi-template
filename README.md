@@ -13,7 +13,12 @@ rails new myapp -m https://raw.githubusercontent.com/shishi-odoshi/odoshi-templa
 - `gem "odoshi"` (zero runtime dependencies; the supervisor never loads Rails)
 - `config/supervisor.rb` — `rest_for_one` tree: `:web` (puma, health = HTTP `/up`
   probe) then `:jobs` (Solid Queue, health = active heartbeat)
-- `bin/supervise` — run the tree; Ctrl-C drains children in reverse order
+- `bin/supervise` — run the tree; Ctrl-C drains children in reverse order. It is a
+  **group-scoped binstub, not `bundle exec`**: the supervisor activates only the
+  `:supervisor` Gemfile group, never the app's gems (odoshi DESIGN §9), which is what
+  lets it supervise Rails boot itself rather than sharing it. Measured on a generated
+  132-gem app: 129ms to start the supervisor vs 189ms under `bundle exec`, against
+  727ms for a full app boot.
 - `config/initializers/odoshi_heartbeat.rb` — the jobs child heartbeats over
   the supervisor's Unix socket; a silent no-op when the app runs unsupervised
 - `lib/tasks/chaos.rake`:
